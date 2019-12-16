@@ -3,17 +3,24 @@ from konfig import Config
 from time import sleep
 import datetime
 import logging
+import socket
 import sys
 import os
 import re
 
 
-def form_answer(request):
+def form_answer(request, rc_dict, status_ready=True):
     def gen_check_val(data):
         lrc = 0
         for symbol in data:
             lrc ^= symbol
         return chr(lrc)
+
+    def gen_trans_id():
+        time = datetime.datetime.now()
+        time = str(time.time()).split(':')
+        trans_id = time[0] + time[1] + ''.join(time[2].split('.'))[:4]
+        return trans_id
 
     def sale_qr_answer():
         pattern = re.compile(r'\x02.{45}')
@@ -22,11 +29,10 @@ def form_answer(request):
         RC = '001'
         card_type = 'RD'
         qr_code = 'g<QR:https://www.youtube.com/watch?v=dQw4w9WgXcQ>'
-        rrn = ''.join([str(randint(0, 9)) for i in range(8)])
+        rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
         approval_code = 'F' + ''.join([str(randint(0, 9)) for i in range(6)]) + ' A'
         optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
-
         try:
             sequence_number = re.search(seq_pattern, request)[0] + '0'
         except TypeError:
@@ -40,14 +46,22 @@ def form_answer(request):
 
     def sale_status_answer():
         pattern = re.compile(r'\x02.{45}')
-        rrn_pattern = re.compile(r'T(\d{8})')
         seq_pattern = re.compile(r'h\d{9}')
 
-        RC = '001'
+        if status_ready:
+            if rc_dict['sale_rc']:
+                RC = '001'
+                alipay_status = "g<ALIPAY_STATUS:SUCCESS>"
+            else:
+                RC = '602'
+                alipay_status = "g<ALIPAY_STATUS:FAILED>"
+        else:
+            RC = '601'
+            alipay_status = "g<ALIPAY_STATUS:UNKNOW>"
+
         card_type = 'RD'
-        rrn = re.search(rrn_pattern, request).group(1)
+        rrn = gen_trans_id()
         optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
-        alipay_status = "g<ALIPAY_STATUS:SUCCESS>"
         const_fields = re.search(pattern, request)[0]
         sequence_number = re.search(seq_pattern, request)[0] + '0'
 
@@ -59,11 +73,22 @@ def form_answer(request):
 
     def sale_final_answer():
         pattern = re.compile(r'\x02.{45}')
+        seq_pattern = re.compile(r'h\d{9}')
+        app_code_pattern = re.compile(r'F\d{6}\sA')
 
         RC = '001'
+        card_type = 'RD'
+        rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
+        optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
+        app_code = re.search(app_code_pattern, request)[0]
 
-        response = const_fields + RC
+        try:
+            sequence_number = re.search(seq_pattern, request)[0] + '0'
+        except TypeError:
+            return reverse_answer()
+
+        response = '\x1c'.join([const_fields + RC, app_code, card_type, optional_data, sequence_number, 't' + rrn])
         response = response + b'\x03'.decode('utf-8')
         LRC = gen_check_val(response.encode('utf-8')[1:])
         response += LRC
@@ -72,11 +97,10 @@ def form_answer(request):
     def refund_answer():
         pattern = re.compile(r'\x02.{45}')
         seq_pattern = re.compile(r'h\d{9}')
-        rrn_pattern = re.compile(r't(\d{8})')
 
-        RC = '001'
+        RC = rc_dict['refund_rc']
         card_type = 'RD'
-        rrn = re.search(rrn_pattern, request).group(1)
+        rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
         approval_code = 'F' + ''.join([str(randint(0, 9)) for i in range(6)]) + ' A'
         optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
@@ -90,20 +114,10 @@ def form_answer(request):
 
     def reverse_answer():
         pattern = re.compile(r'\x02.{45}')
-        rrn_pattern = re.compile(r't(\d{8})')
 
-        try:
-            rrn = re.search(rrn_pattern, request).group(1)
-            optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
-        except TypeError:
-            rrn = ''.join([str(randint(0, 9)) for i in range(8)])
-            optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
-
-        RC = '001'
+        RC = rc_dict['void_rc']
         const_fields = re.search(pattern, request)[0]
-
-        response = '\x1c'.join([const_fields + RC, optional_data, 't' + rrn])
-
+        response = ''.join([const_fields, RC])
         response = response + b'\x03'.decode('utf-8')
         LRC = gen_check_val(response.encode('utf-8')[1:])
         response += LRC
@@ -183,25 +197,42 @@ def conf_parser():
     if not os.path.exists('config.ini'):
         file = open('config.ini', 'w')
         file.write('[Srv_settings]\n'
-                   'SERVER_ADDRESS=\n'
+                   f'SERVER_ADDRESS={str(socket.gethostbyname_ex(socket.gethostname())[2][0])}\n'
                    'SERVER_PORT=\n'
-                   'HEX_DUMP=\n\n'
+                   'HEX_DUMP=0\n\n'
                    '[Ali_settings]\n'
-                   'RC=\n'
-                   'TIME=')
+                   'STATUS=1\n'
+                   'PROCESS_TIME=0\n'
+                   'REFUND_RC=001\n'
+                   'VOID_RC=001\n\n'
+                   '[DELAY]\n'
+                   'VOID_DELAY=0\n'
+                   'FINAL_DELAY=0\n'
+                   'STATUS_DELAY=0\n'
+                   'REFUND_DELAY=0\n'
+                   'QR_CODE_DELAY=0\n'
+                   'DEFAULT_DELAY=0\n'
+                   'CLOSE_OP_DELAY=0\n')
         file.close()
 
     conf = Config('config.ini')
     try:
         sett_dict = {
-            'addr': conf.as_args()[conf.as_args().index('--Srv-settings-SERVER-ADDRESS') + 1],
+            'hexd': conf.as_args()[conf.as_args().index('--Srv-settings-HEX-DUMP') + 1],
             'port': conf.as_args()[conf.as_args().index('--Srv-settings-SERVER-PORT') + 1],
-            'resp': conf.as_args()[conf.as_args().index('--Ali-settings-RC') + 1],
-            'time': conf.as_args()[conf.as_args().index('--Ali-settings-TIME') + 1],
-            'hexd': conf.as_args()[conf.as_args().index('--Srv-settings-HEX-DUMP') + 1]
+            'addr': conf.as_args()[conf.as_args().index('--Srv-settings-SERVER-ADDRESS') + 1],
+            'stat': conf.as_args()[conf.as_args().index('--Ali-settings-STATUS') + 1],
+            'stat_time': conf.as_args()[conf.as_args().index('--Ali-settings-PROCESS-TIME') + 1],
+            'refund_rc': conf.as_args()[conf.as_args().index('--Ali-settings-REFUND-RC') + 1],
+            'void_rc': conf.as_args()[conf.as_args().index('--Ali-settings-VOID-RC') + 1],
+            'void_time': conf.as_args()[conf.as_args().index('--DELAY-VOID-DELAY') + 1],
+            'final_time': conf.as_args()[conf.as_args().index('--DELAY-FINAL-DELAY') + 1],
+            'status_time': conf.as_args()[conf.as_args().index('--DELAY-STATUS-DELAY') + 1],
+            'refund_time': conf.as_args()[conf.as_args().index('--DELAY-REFUND-DELAY') + 1],
+            'qr_code_time': conf.as_args()[conf.as_args().index('--DELAY-QR-CODE-DELAY') + 1],
+            'default_time': conf.as_args()[conf.as_args().index('--DELAY-DEFAULT-DELAY') + 1],
+            'close_op_time': conf.as_args()[conf.as_args().index('--DELAY-CLOSE-OP-DELAY') + 1]
         }
-        if len(sett_dict['resp']) < 3:
-            sett_dict['resp'] = '0' * (3 - len(sett_dict['resp'])) + sett_dict['resp']
 
         set_logging(); logging.info(f'Config values:{sett_dict}')
         return sett_dict
