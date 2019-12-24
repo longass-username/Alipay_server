@@ -27,14 +27,24 @@ Alipay операций.
 [Srv_settings]
 SERVER_ADDRESS - адрес сервера
 SERVER_PORT - порт сервера
+PROTOCOL - протокол (OWN/TPTP)
 HEX_DUMP - вывод hex dump запроса/ответа (0 - выкл, 1 - вкл)
 
-[Ali_settings]
+[Main_settings]
+TERMINAL - Card Acceptor Terminal
+CURRENCY - валюта транзакции
+
+[Tptp_settings]
 STATUS - конечный ответ хоста на запрос статуса (0 - RC:602, 1 - RC:001)
 PROCESS_TIME - время (в секундах), через которое хост вышлет конечный ответ на запрос статуса, 
 	       с момента первого запроса статуса
-REFUND_RC - кастомный responsse code на операцию "возврат Alipay"
-VOID_RC - кастомный responsse code на операцию "отмена Alipay"
+REFUND_RC - кастомный response code на операцию "возврат Alipay"
+VOID_RC - кастомный response code на операцию "отмена Alipay"
+
+[Own_settings]
+PROCESS_TIME - то же самое, что и PROCESS_TIME в Tptp_settings, но для протокола OWN
+REFUND_RC - кастомный response code на операцию "возврат Alipay"
+SALE_RC - кастомный response code на операцию "оплата Alipay"
 
 [DELAY] (все опции в секундах)
 VOID_DELAY - задержка ответа на операцию "отмена Alipay"
@@ -54,3 +64,9 @@ v0.0.3 - Бета версия, добавлены операции Отмена
 v0.0.4 - Бета версия, добавлен отрицательный ответ на оплату, добавлено время задержки ответа.
 
 v0.1.0 - Релиз, добавлены кастомные ответы на отмену и возврат.
+
+v0.1.1 - Добавлены операции Оплата и Возврат для протокола OpenWay.
+
+v0.1.2 - Доработка опций Main_settings, баг фикс.
+
+v0.1.3 - Добавлены кастомные RC для Оплаты и Возврата по протоколу OpenWay.

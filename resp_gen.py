@@ -9,7 +9,7 @@ import os
 import re
 
 
-def form_answer(request, rc_dict, status_ready=True):
+def form_answer(request, rc_dict, main_dict, status_ready=True):
     def gen_check_val(data):
         lrc = 0
         for symbol in data:
@@ -32,7 +32,7 @@ def form_answer(request, rc_dict, status_ready=True):
         rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
         approval_code = 'F' + ''.join([str(randint(0, 9)) for i in range(6)]) + ' A'
-        optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
+        optional_data = f'a&C{main_dict["currency"]}#&R01#&r{rrn}#&p{rrn}#'
         try:
             sequence_number = re.search(seq_pattern, request)[0] + '0'
         except TypeError:
@@ -61,7 +61,7 @@ def form_answer(request, rc_dict, status_ready=True):
 
         card_type = 'RD'
         rrn = gen_trans_id()
-        optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
+        optional_data = f'a&C{main_dict["currency"]}#&R01#&r{rrn}#&p{rrn}#'
         const_fields = re.search(pattern, request)[0]
         sequence_number = re.search(seq_pattern, request)[0] + '0'
 
@@ -80,7 +80,7 @@ def form_answer(request, rc_dict, status_ready=True):
         card_type = 'RD'
         rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
-        optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
+        optional_data = f'a&C{main_dict["currency"]}#&R01#&r{rrn}#&p{rrn}#'
         app_code = re.search(app_code_pattern, request)[0]
 
         try:
@@ -103,7 +103,7 @@ def form_answer(request, rc_dict, status_ready=True):
         rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
         approval_code = 'F' + ''.join([str(randint(0, 9)) for i in range(6)]) + ' A'
-        optional_data = f'a&C643#&R01#&r{rrn}#&p{rrn}#'
+        optional_data = f'a&C{main_dict["currency"]}#&R01#&r{rrn}#&p{rrn}#'
         sequence_number = re.search(seq_pattern, request)[0] + '0'
 
         response = '\x1c'.join([const_fields + RC, approval_code, card_type, optional_data, sequence_number, 't' + rrn])
@@ -199,12 +199,20 @@ def conf_parser():
         file.write('[Srv_settings]\n'
                    f'SERVER_ADDRESS={str(socket.gethostbyname_ex(socket.gethostname())[2][0])}\n'
                    'SERVER_PORT=\n'
+                   'PROTOCOL=TPTP\n'
                    'HEX_DUMP=0\n\n'
-                   '[Ali_settings]\n'
+                   '[Main_settings]\n'
+                   'TERMINAL=12345678\n'
+                   'CURRENCY=643\n\n'
+                   '[Tptp_settings]\n'
                    'STATUS=1\n'
                    'PROCESS_TIME=0\n'
                    'REFUND_RC=001\n'
                    'VOID_RC=001\n\n'
+                   '[Own_settings]\n'
+                   'PROCESS_TIME=0\n'
+                   'REFUND_RC=00\n'
+                   'SALE_RC=00\n\n'
                    '[DELAY]\n'
                    'VOID_DELAY=0\n'
                    'FINAL_DELAY=0\n'
@@ -220,11 +228,17 @@ def conf_parser():
         sett_dict = {
             'hexd': conf.as_args()[conf.as_args().index('--Srv-settings-HEX-DUMP') + 1],
             'port': conf.as_args()[conf.as_args().index('--Srv-settings-SERVER-PORT') + 1],
+            'protocol': conf.as_args()[conf.as_args().index('--Srv-settings-PROTOCOL') + 1],
             'addr': conf.as_args()[conf.as_args().index('--Srv-settings-SERVER-ADDRESS') + 1],
-            'stat': conf.as_args()[conf.as_args().index('--Ali-settings-STATUS') + 1],
-            'stat_time': conf.as_args()[conf.as_args().index('--Ali-settings-PROCESS-TIME') + 1],
-            'refund_rc': conf.as_args()[conf.as_args().index('--Ali-settings-REFUND-RC') + 1],
-            'void_rc': conf.as_args()[conf.as_args().index('--Ali-settings-VOID-RC') + 1],
+            'terminal': conf.as_args()[conf.as_args().index('--Main-settings-TERMINAL') + 1],
+            'currency': conf.as_args()[conf.as_args().index('--Main-settings-CURRENCY') + 1],
+            'tptp_stat_time': conf.as_args()[conf.as_args().index('--Tptp-settings-PROCESS-TIME') + 1],
+            'refund_rc': conf.as_args()[conf.as_args().index('--Tptp-settings-REFUND-RC') + 1],
+            'void_rc': conf.as_args()[conf.as_args().index('--Tptp-settings-VOID-RC') + 1],
+            'stat': conf.as_args()[conf.as_args().index('--Tptp-settings-STATUS') + 1],
+            'own_stat_time': conf.as_args()[conf.as_args().index('--Own-settings-PROCESS-TIME') + 1],
+            'own_refund_rc': conf.as_args()[conf.as_args().index('--Own-settings-REFUND-RC') + 1],
+            'own_sale_rc': conf.as_args()[conf.as_args().index('--Own-settings-SALE-RC') + 1],
             'void_time': conf.as_args()[conf.as_args().index('--DELAY-VOID-DELAY') + 1],
             'final_time': conf.as_args()[conf.as_args().index('--DELAY-FINAL-DELAY') + 1],
             'status_time': conf.as_args()[conf.as_args().index('--DELAY-STATUS-DELAY') + 1],

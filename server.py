@@ -1,6 +1,7 @@
 from binascii import unhexlify
 from socket import socket
 from select import select
+import open_way
 import resp_gen
 import version
 import logging
@@ -10,21 +11,35 @@ import sys
 
 def setup_vars():
     def get_rc():
-        global REFUND_RC
         global VOID_RC
+        global REFUND_RC
+        global OWN_SALE_RC
+        global OWN_REFUND_RC
 
-        REFUND_RC = str(int(config_dict['refund_rc']))
         VOID_RC = str(int(config_dict['void_rc']))
+        REFUND_RC = str(int(config_dict['refund_rc']))
+        OWN_SALE_RC = str(int(config_dict['own_sale_rc'])).encode('utf-8')
+        OWN_REFUND_RC = str(int(config_dict['own_refund_rc'])).encode('utf-8')
+
         if len(REFUND_RC) != 3:
             REFUND_RC = '0' * (3 - len(REFUND_RC)) + REFUND_RC
         if len(VOID_RC) != 3:
             VOID_RC = '0' * (3 - len(VOID_RC)) + VOID_RC
+        if len(OWN_SALE_RC) != 2:
+            OWN_SALE_RC = b'0' * (2 - len(OWN_SALE_RC)) + OWN_SALE_RC
+        if len(OWN_REFUND_RC) != 2:
+            OWN_REFUND_RC = b'0' * (2 - len(OWN_REFUND_RC)) + OWN_REFUND_RC
 
     global TIMER
     global RC_DICT
+    global PROTOCOL
+    global TERMINAL
+    global CURRENCY
+    global MAIN_DICT
     global PRINT_HEX
     global INPUT_DATA
     global VOID_DELAY
+    global OWN_RC_DICT
     global OUTPUT_DATA
     global FINAL_DELAY
     global SRV_ADDRESS
@@ -36,6 +51,7 @@ def setup_vars():
     global QR_CODE_DELAY
     global CLOSE_OP_DELAY
     global TIMER_CONN_LIST
+    global OWN_PROCESS_TIME
     global STATUS_TIMER_LIST
 
     try:
@@ -43,8 +59,12 @@ def setup_vars():
         get_rc()  # prepare response code for refund and void operations
 
         SRV_ADDRESS = (config_dict['addr'], int(config_dict['port']))
-        PROCESS_TIME = int(config_dict['stat_time'])
+        PROCESS_TIME = int(config_dict['tptp_stat_time'])
+        OWN_PROCESS_TIME = int(config_dict['own_stat_time'])
         PRINT_HEX = bool(int(config_dict['hexd']))
+        PROTOCOL = str(config_dict['protocol']).upper()
+        TERMINAL = str(config_dict['terminal'])
+        CURRENCY = str(int(config_dict['currency']))
         INPUT_DATA = list()
         OUTPUT_DATA = list()
         LAST_REQUEST = dict()
@@ -62,6 +82,21 @@ def setup_vars():
         RC_DICT = {'sale_rc': bool(int(config_dict['stat'])),
                    'refund_rc': REFUND_RC,
                    'void_rc': VOID_RC}
+
+        MAIN_DICT = {'terminal': TERMINAL,
+                     'currency': CURRENCY}
+
+        OWN_RC_DICT = {'sale_rc': OWN_SALE_RC,
+                       'refund_rc': OWN_REFUND_RC}
+
+        if PROTOCOL != 'OWN' and PROTOCOL != 'TPTP':
+            print('Wrong PROTOCOL value!')
+            input('Press ENTER to exit.')
+            sys.exit()
+        elif len(TERMINAL) != 8:
+            print('Wrong TERMINAL value!')
+            input('Press ENTER to exit.')
+            sys.exit()
     except ValueError:
         print('Wrong values in config.ini!')
         input('Press ENTER to exit.')
@@ -88,15 +123,15 @@ def ready_to_answer(addr, resp=None):
         cur_time = time.perf_counter()
         if len(resp) >= 49:
             try:
-                if resp[41:43] == b'00':
+                if resp[41:43] == b'00' or resp[2:4] == b'\x94\x30':
                     TIMER_CONN_LIST.append([addr, cur_time + VOID_DELAY])
-                elif resp[41:43] == b'01':
+                elif resp[41:43] == b'01' or resp[2:4] == b'\x97\x10':
                     TIMER_CONN_LIST.append([addr, cur_time + QR_CODE_DELAY])
-                elif resp[41:43] == b'02':
+                elif resp[41:43] == b'02' or resp[2:4] == b'\x02\x30':
                     TIMER_CONN_LIST.append([addr, cur_time + FINAL_DELAY])
-                elif resp[41:43] == b'04':
+                elif resp[41:43] == b'04' or resp[2:4] == b'\x02\x10':
                     TIMER_CONN_LIST.append([addr, cur_time + REFUND_DELAY])
-                elif resp[41:43] == b'36':
+                elif resp[41:43] == b'36' or resp[2:4] == b'\x06\x30':
                     TIMER_CONN_LIST.append([addr, cur_time + STATUS_DELAY])
                 else:
                     TIMER_CONN_LIST.append([addr, cur_time + DEFAULT_DELAY])
@@ -118,47 +153,87 @@ def ready_to_answer(addr, resp=None):
 
 
 def status_ready(peer_name, request):
-    if request[41:43] == '36':
-        if PROCESS_TIME == 0:
-            return True
-        else:
-            cur_time = time.perf_counter()
-            for peer in STATUS_TIMER_LIST:
-                if peer_name in peer:
-                    if cur_time > peer[1]:
-                        # STATUS_TIMER_LIST.pop(STATUS_TIMER_LIST.index(peer))
-                        return True
-                    else:
-                        return False
+    if PROTOCOL == 'TPTP':
+        if request[41:43] == '36':
+            if PROCESS_TIME == 0:
+                return True
             else:
-                STATUS_TIMER_LIST.append([peer_name, cur_time + PROCESS_TIME])
-                return False
-    else:
-        return True
+                cur_time = time.perf_counter()
+                for peer in STATUS_TIMER_LIST:
+                    if peer_name in peer:
+                        if cur_time > peer[1]:
+                            return True
+                        else:
+                            return False
+                else:
+                    STATUS_TIMER_LIST.append([peer_name, cur_time + PROCESS_TIME])
+                    return False
+        else:
+            return True
+    elif PROTOCOL == 'OWN':
+        if request[2:4] == b'\x06\x20':
+            if OWN_PROCESS_TIME == 0:
+                return True
+            else:
+                cur_time = time.perf_counter()
+                for peer in STATUS_TIMER_LIST:
+                    if peer_name in peer:
+                        if cur_time > peer[1]:
+                            return True
+                        else:
+                            return False
+                else:
+                    STATUS_TIMER_LIST.append([peer_name, cur_time + OWN_PROCESS_TIME])
+                    return False
 
 
 def handle_writables(writs):
     for resource in writs:
         try:
-            req = LAST_REQUEST[resource.getpeername()].decode('utf-8')
-            resp = resp_gen.form_answer(req,
-                                        RC_DICT,
-                                        status_ready(resource.getpeername(), req))
+            if PROTOCOL == 'TPTP':
+                req = LAST_REQUEST[resource.getpeername()].decode('utf-8')
+                resp = resp_gen.form_answer(req,
+                                            RC_DICT,
+                                            MAIN_DICT,
+                                            status_ready(resource.getpeername(), req))
+            elif PROTOCOL == 'OWN':
+                req = LAST_REQUEST[resource.getpeername()]
+                resp = open_way.form_answer(req,
+                                            OWN_RC_DICT,
+                                            MAIN_DICT,
+                                            status_ready(resource.getpeername(), req))
+            else:
+                resp = None
 
             if resp and ready_to_answer(resource.getpeername(), resp):
-                print(f'RESPONSE TO {resource.getpeername()}:\n{resp_gen.print_req_res(resp)}\n')
-                resp_gen.set_logging()
-                logging.info(f'RESPONSE TO  {resource.getpeername()}:{str(resp)}')
+                if PROTOCOL == 'TPTP':
+                    print(f'RESPONSE TO {resource.getpeername()}:\n{resp_gen.print_req_res(resp)}\n')
+                    resp_gen.set_logging()
+                    logging.info(f'RESPONSE TO  {resource.getpeername()}:{str(resp)}')
 
-                if PRINT_HEX:
-                    print(resp_gen.print_hex_dump(resp))
-                resource.send(resp)
-                OUTPUT_DATA.remove(resource)
+                    if PRINT_HEX:
+                        print(resp_gen.print_hex_dump(resp))
+                    resource.send(resp)
+                    OUTPUT_DATA.remove(resource)
 
-                if resp.decode('utf-8').find('SUCCESS') != -1 or resp.decode('utf-8').find('FAILED') != -1:
-                    for peer in STATUS_TIMER_LIST:
-                        if resource.getpeername() in peer:
-                            STATUS_TIMER_LIST.pop(STATUS_TIMER_LIST.index(peer))
+                    if resp.decode('utf-8').find('SUCCESS') != -1 or resp.decode('utf-8').find('FAILED') != -1:
+                        for peer in STATUS_TIMER_LIST:
+                            if resource.getpeername() in peer:
+                                STATUS_TIMER_LIST.pop(STATUS_TIMER_LIST.index(peer))
+                elif PROTOCOL == 'OWN':
+                    print(f'RESPONSE TO {resource.getpeername()}:\n{resp}\n')
+                    resp_gen.set_logging()
+                    logging.info(f'RESPONSE TO  {resource.getpeername()}:{str(resp)}')
+
+                    if PRINT_HEX:
+                        print(resp_gen.print_hex_dump(resp[2:]))
+                    resource.send(resp)
+                    OUTPUT_DATA.remove(resource)
+
+                    if resp[2:4] == b'\x06\x30' and resp[43:45] != b'09':
+                        for peer in STATUS_TIMER_LIST:
+                            if resource.getpeername() in peer:
+                                STATUS_TIMER_LIST.pop(STATUS_TIMER_LIST.index(peer))
         except OSError:
             clear_resource(resource)
 
@@ -171,7 +246,8 @@ def handle_readables(reads, server):
             INPUT_DATA.append(conn)
             print(f'New connection:{addr}\n')
             resp_gen.set_logging(); logging.info(f'New connection:{str(conn)}')
-            conn.send(b'\x05')
+            if PROTOCOL == 'TPTP':
+                conn.send(b'\x05')
         else:
             data = b''
             try:
@@ -180,12 +256,19 @@ def handle_readables(reads, server):
                 pass
 
             if data:
-                print(f'REQUEST FROM {resource.getpeername()}:\n{resp_gen.print_req_res(data)}\n')
+                if PROTOCOL == 'TPTP':
+                    print(f'REQUEST FROM {resource.getpeername()}:\n{resp_gen.print_req_res(data)}\n')
+                elif PROTOCOL == 'OWN':
+                    print(f'REQUEST FROM {resource.getpeername()}:\n{data}\n')
+
                 resp_gen.set_logging()
                 logging.info(f'REQUEST FROM {resource.getpeername()}:{str(data)}')
 
                 if PRINT_HEX:
-                    print(resp_gen.print_hex_dump(data))
+                    if PROTOCOL == 'TPTP':
+                        print(resp_gen.print_hex_dump(data))
+                    elif PROTOCOL == 'OWN':
+                        print(resp_gen.print_hex_dump(data[2:]))
 
                 if resource.getpeername() not in LAST_REQUEST:
                     LAST_REQUEST.update({resource.getpeername(): data})
