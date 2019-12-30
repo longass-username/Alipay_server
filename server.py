@@ -30,11 +30,10 @@ def setup_vars():
         if len(OWN_REFUND_RC) != 2:
             OWN_REFUND_RC = b'0' * (2 - len(OWN_REFUND_RC)) + OWN_REFUND_RC
 
+    global PARSE
     global TIMER
     global RC_DICT
     global PROTOCOL
-    global TERMINAL
-    global CURRENCY
     global MAIN_DICT
     global PRINT_HEX
     global INPUT_DATA
@@ -63,8 +62,7 @@ def setup_vars():
         OWN_PROCESS_TIME = int(config_dict['own_stat_time'])
         PRINT_HEX = bool(int(config_dict['hexd']))
         PROTOCOL = str(config_dict['protocol']).upper()
-        TERMINAL = str(config_dict['terminal'])
-        CURRENCY = str(int(config_dict['currency']))
+        PARSE = bool(int(config_dict['parse']))
         INPUT_DATA = list()
         OUTPUT_DATA = list()
         LAST_REQUEST = dict()
@@ -79,22 +77,17 @@ def setup_vars():
         DEFAULT_DELAY = int(config_dict['default_time'])
         CLOSE_OP_DELAY = int(config_dict['close_op_time'])
 
-        RC_DICT = {'sale_rc': bool(int(config_dict['stat'])),
+        RC_DICT = {'cl_batch': bool(int(config_dict['tptp_cl_batch'])),
+                   'sale_rc': bool(int(config_dict['stat'])),
                    'refund_rc': REFUND_RC,
                    'void_rc': VOID_RC}
 
-        MAIN_DICT = {'terminal': TERMINAL,
-                     'currency': CURRENCY}
-
-        OWN_RC_DICT = {'sale_rc': OWN_SALE_RC,
+        OWN_RC_DICT = {'cl_batch': bool(int(config_dict['own_cl_batch'])),
+                       'sale_rc': OWN_SALE_RC,
                        'refund_rc': OWN_REFUND_RC}
 
         if PROTOCOL != 'OWN' and PROTOCOL != 'TPTP':
             print('Wrong PROTOCOL value!')
-            input('Press ENTER to exit.')
-            sys.exit()
-        elif len(TERMINAL) != 8:
-            print('Wrong TERMINAL value!')
             input('Press ENTER to exit.')
             sys.exit()
     except ValueError:
@@ -194,13 +187,11 @@ def handle_writables(writs):
                 req = LAST_REQUEST[resource.getpeername()].decode('utf-8')
                 resp = resp_gen.form_answer(req,
                                             RC_DICT,
-                                            MAIN_DICT,
                                             status_ready(resource.getpeername(), req))
             elif PROTOCOL == 'OWN':
                 req = LAST_REQUEST[resource.getpeername()]
                 resp = open_way.form_answer(req,
                                             OWN_RC_DICT,
-                                            MAIN_DICT,
                                             status_ready(resource.getpeername(), req))
             else:
                 resp = None
@@ -211,8 +202,13 @@ def handle_writables(writs):
                     resp_gen.set_logging()
                     logging.info(f'RESPONSE TO  {resource.getpeername()}:{str(resp)}')
 
-                    if PRINT_HEX:
-                        print(resp_gen.print_hex_dump(resp))
+                    if PRINT_HEX: print(resp_gen.print_hex_dump(resp))
+                    if PARSE:
+                        values = resp_gen.parse_data(resp)
+                        if values:
+                            for val in values:
+                                print('{:20}:{}'.format(val, values[val]))
+                            print('\n', end='')
                     resource.send(resp)
                     OUTPUT_DATA.remove(resource)
 
@@ -225,8 +221,13 @@ def handle_writables(writs):
                     resp_gen.set_logging()
                     logging.info(f'RESPONSE TO  {resource.getpeername()}:{str(resp)}')
 
-                    if PRINT_HEX:
-                        print(resp_gen.print_hex_dump(resp[2:]))
+                    if PRINT_HEX: print(resp_gen.print_hex_dump(resp[2:]))
+                    if PARSE:
+                        values = open_way.get_values(resp)
+                        if values:
+                            for val in values:
+                                print('{:2}:{}'.format(val, values[val]))
+                            print('\n', end='')
                     resource.send(resp)
                     OUTPUT_DATA.remove(resource)
 
@@ -269,7 +270,19 @@ def handle_readables(reads, server):
                         print(resp_gen.print_hex_dump(data))
                     elif PROTOCOL == 'OWN':
                         print(resp_gen.print_hex_dump(data[2:]))
-
+                if PARSE:
+                    if PROTOCOL == 'OWN':
+                        values = open_way.get_values(data)
+                        if values:
+                            for val in values:
+                                print('{:2}:{}'.format(val, values[val]))
+                            print('\n', end='')
+                    elif PROTOCOL == 'TPTP':
+                        values = resp_gen.parse_data(data)
+                        if values:
+                            for val in values:
+                                print('{:20}:{}'.format(val, values[val]))
+                            print('\n', end='')
                 if resource.getpeername() not in LAST_REQUEST:
                     LAST_REQUEST.update({resource.getpeername(): data})
                 else:
