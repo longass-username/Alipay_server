@@ -5,8 +5,10 @@ import open_way
 import resp_gen
 import version
 import logging
+import shutil
 import time
 import sys
+import os
 
 
 def setup_vars():
@@ -15,40 +17,27 @@ def setup_vars():
         global REFUND_RC
         global OWN_SALE_RC
         global OWN_REFUND_RC
+        global KEY_DECLINE_RC
 
-        VOID_RC = str(int(config_dict['void_rc']))
-        REFUND_RC = str(int(config_dict['refund_rc']))
-        OWN_SALE_RC = str(int(config_dict['own_sale_rc'])).encode('utf-8')
-        OWN_REFUND_RC = str(int(config_dict['own_refund_rc'])).encode('utf-8')
-
-        if len(REFUND_RC) != 3:
-            REFUND_RC = '0' * (3 - len(REFUND_RC)) + REFUND_RC
-        if len(VOID_RC) != 3:
-            VOID_RC = '0' * (3 - len(VOID_RC)) + VOID_RC
-        if len(OWN_SALE_RC) != 2:
-            OWN_SALE_RC = b'0' * (2 - len(OWN_SALE_RC)) + OWN_SALE_RC
-        if len(OWN_REFUND_RC) != 2:
-            OWN_REFUND_RC = b'0' * (2 - len(OWN_REFUND_RC)) + OWN_REFUND_RC
+        VOID_RC = str(int(config_dict['void_rc'])).zfill(3)
+        REFUND_RC = str(int(config_dict['refund_rc'])).zfill(3)
+        OWN_SALE_RC = str(int(config_dict['own_sale_rc'])).zfill(2).encode('utf-8')
+        OWN_REFUND_RC = str(int(config_dict['own_refund_rc'])).zfill(2).encode('utf-8')
+        KEY_DECLINE_RC = str(int(config_dict['key_decline_rc'])).zfill(2).encode('utf-8')
 
     global PARSE
     global TIMER
+    global DELAY
     global RC_DICT
     global PROTOCOL
     global MAIN_DICT
     global PRINT_HEX
     global INPUT_DATA
-    global VOID_DELAY
     global OWN_RC_DICT
     global OUTPUT_DATA
-    global FINAL_DELAY
     global SRV_ADDRESS
     global PROCESS_TIME
     global LAST_REQUEST
-    global REFUND_DELAY
-    global STATUS_DELAY
-    global DEFAULT_DELAY
-    global QR_CODE_DELAY
-    global CLOSE_OP_DELAY
     global TIMER_CONN_LIST
     global OWN_PROCESS_TIME
     global STATUS_TIMER_LIST
@@ -69,13 +58,13 @@ def setup_vars():
         TIMER_CONN_LIST = list()
         STATUS_TIMER_LIST = list()
 
-        VOID_DELAY = int(config_dict['void_time'])
-        FINAL_DELAY = int(config_dict['final_time'])
-        STATUS_DELAY = int(config_dict['status_time'])
-        REFUND_DELAY = int(config_dict['refund_time'])
-        QR_CODE_DELAY = int(config_dict['qr_code_time'])
-        DEFAULT_DELAY = int(config_dict['default_time'])
-        CLOSE_OP_DELAY = int(config_dict['close_op_time'])
+        DELAY = {'VOID': int(config_dict['void_time']),
+                 'FINAL': int(config_dict['final_time']),
+                 'STATUS': int(config_dict['status_time']),
+                 'REFUND': int(config_dict['refund_time']),
+                 'QR_CODE': int(config_dict['qr_code_time']),
+                 'DEFAULT': int(config_dict['default_time']),
+                 'CLOSE_OP': int(config_dict['close_op_time'])}
 
         RC_DICT = {'cl_batch': bool(int(config_dict['tptp_cl_batch'])),
                    'sale_rc': bool(int(config_dict['stat'])),
@@ -84,7 +73,8 @@ def setup_vars():
 
         OWN_RC_DICT = {'cl_batch': bool(int(config_dict['own_cl_batch'])),
                        'sale_rc': OWN_SALE_RC,
-                       'refund_rc': OWN_REFUND_RC}
+                       'refund_rc': OWN_REFUND_RC,
+                       'key_decline_rc': KEY_DECLINE_RC}
 
         if PROTOCOL != 'OWN' and PROTOCOL != 'TPTP':
             print('Wrong PROTOCOL value!')
@@ -114,20 +104,20 @@ def ready_to_answer(addr, resp=None):
                 return False
     else:
         cur_time = time.perf_counter()
-        if len(resp) >= 49:
+        if len(resp) >= 10:
             try:
                 if resp[41:43] == b'00' or resp[2:4] == b'\x94\x30':
-                    TIMER_CONN_LIST.append([addr, cur_time + VOID_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['VOID']])
                 elif resp[41:43] == b'01' or resp[2:4] == b'\x97\x10':
-                    TIMER_CONN_LIST.append([addr, cur_time + QR_CODE_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['QR_CODE']])
                 elif resp[41:43] == b'02' or resp[2:4] == b'\x02\x30':
-                    TIMER_CONN_LIST.append([addr, cur_time + FINAL_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['FINAL']])
                 elif resp[41:43] == b'04' or resp[2:4] == b'\x02\x10':
-                    TIMER_CONN_LIST.append([addr, cur_time + REFUND_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['REFUND']])
                 elif resp[41:43] == b'36' or resp[2:4] == b'\x06\x30':
-                    TIMER_CONN_LIST.append([addr, cur_time + STATUS_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['STATUS']])
                 else:
-                    TIMER_CONN_LIST.append([addr, cur_time + DEFAULT_DELAY])
+                    TIMER_CONN_LIST.append([addr, cur_time + DELAY['DEFAULT']])
 
                 for connect in TIMER_CONN_LIST:
                     if addr in connect:
@@ -135,13 +125,12 @@ def ready_to_answer(addr, resp=None):
                             return True
                         else:
                             return False
-
             except TypeError as e:
                 resp_gen.set_logging(); logging.error(f'ERROR:\n{e}')
                 return False
         else:
             if resp:
-                TIMER_CONN_LIST.append([addr, cur_time + CLOSE_OP_DELAY])
+                TIMER_CONN_LIST.append([addr, cur_time + DELAY['CLOSE_OP']])
             return False
 
 
@@ -205,10 +194,7 @@ def handle_writables(writs):
                     if PRINT_HEX: print(resp_gen.print_hex_dump(resp))
                     if PARSE:
                         values = resp_gen.parse_data(resp)
-                        if values:
-                            for val in values:
-                                print('{:20}:{}'.format(val, values[val]))
-                            print('\n', end='')
+                        if values: resp_gen.print_result(values)
                     resource.send(resp)
                     OUTPUT_DATA.remove(resource)
 
@@ -224,10 +210,7 @@ def handle_writables(writs):
                     if PRINT_HEX: print(resp_gen.print_hex_dump(resp[2:]))
                     if PARSE:
                         values = open_way.get_values(resp)
-                        if values:
-                            for val in values:
-                                print('{:2}:{}'.format(val, values[val]))
-                            print('\n', end='')
+                        if values: open_way.print_result(values)
                     resource.send(resp)
                     OUTPUT_DATA.remove(resource)
 
@@ -273,16 +256,10 @@ def handle_readables(reads, server):
                 if PARSE:
                     if PROTOCOL == 'OWN':
                         values = open_way.get_values(data)
-                        if values:
-                            for val in values:
-                                print('{:2}:{}'.format(val, values[val]))
-                            print('\n', end='')
+                        if values: open_way.print_result(values)
                     elif PROTOCOL == 'TPTP':
                         values = resp_gen.parse_data(data)
-                        if values:
-                            for val in values:
-                                print('{:20}:{}'.format(val, values[val]))
-                            print('\n', end='')
+                        if values: resp_gen.print_result(values)
                 if resource.getpeername() not in LAST_REQUEST:
                     LAST_REQUEST.update({resource.getpeername(): data})
                 else:
@@ -305,10 +282,11 @@ def clear_resource(res):
         res.close()
     except Exception as e:
         resp_gen.set_logging()
-        logging.info(f'ERROR:\n{e}')
+        logging.error(f'ERROR:\n{e}')
 
 
 if __name__ == '__main__':
+    os.system('cls')
     setup_vars()  # initiates variables
     time.perf_counter()  # initiates timer
     resp_gen.check_log_files()  # controls maximal log files
@@ -320,8 +298,12 @@ if __name__ == '__main__':
         input('Press ENTER to exit.')
         sys.exit()
 
-    INPUT_DATA.append(srv_socket); print(f'----------Alipay test server v{version.get_version()}----------')
+    INPUT_DATA.append(srv_socket)
+    length = shutil.get_terminal_size()[0]
+    fin_length = length - ((length - 25) // 2) - 25
+    header = f'{"-" * ((length - 25) // 2)}Alipay test server v{version.get_version()}{"-" * fin_length}'
     resp_gen.set_logging(); logging.info(f'Server started {srv_socket}')
+    print(header)
 
     try:
         while INPUT_DATA:

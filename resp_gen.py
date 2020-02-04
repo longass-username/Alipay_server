@@ -28,7 +28,7 @@ def form_answer(request, rc_dict, status_ready=True):
         RC = '001'
         rrn = gen_trans_id()
         const_fields = re.search(pattern, request)[0]
-        qr_code = 'g<QR:https://www.youtube.com/watch?v=dQw4w9WgXcQ>'
+        qr_code = 'g<QR:https://example.com>'
         approval_code = ''.join(['F', ''.join([str(randint(0, 9)) for i in range(6)]), ' A'])
         try:
             card_type = ''.join(['R', field_dict['Field <R>']])
@@ -228,7 +228,6 @@ def parse_data(req):
         'Processing flag 2': header[43:44],
         'Processing flag 3': header[44:45],
         'Response code': header[45:48]
-
     }
     if req:
         for field in req:
@@ -243,6 +242,12 @@ def parse_data(req):
             sub_res.update({f'Subfield <{t[0]}>': t[1:]})
         res_dict.update(sub_res)
     return res_dict
+
+
+def print_result(values):
+    for val in values:
+        print('{:20}: {}'.format(val, values[val]))
+    print('\n', end='')
 
 
 def print_req_res(data):
@@ -285,6 +290,7 @@ def conf_parser():
                    'REFUND_RC=001\n'
                    'VOID_RC=001\n\n'
                    '[Own_settings]\n'
+                   'KEY_DECLINE_RC=01\n'
                    'CLOSE_BATCH=1\n'
                    'PROCESS_TIME=0\n'
                    'REFUND_RC=00\n'
@@ -312,6 +318,7 @@ def conf_parser():
             'refund_rc': conf.as_args()[conf.as_args().index('--Tptp-settings-REFUND-RC') + 1],
             'void_rc': conf.as_args()[conf.as_args().index('--Tptp-settings-VOID-RC') + 1],
             'stat': conf.as_args()[conf.as_args().index('--Tptp-settings-STATUS') + 1],
+            'key_decline_rc': conf.as_args()[conf.as_args().index('--Own-settings-KEY-DECLINE-RC') + 1],
             'own_stat_time': conf.as_args()[conf.as_args().index('--Own-settings-PROCESS-TIME') + 1],
             'own_cl_batch': conf.as_args()[conf.as_args().index('--Own-settings-CLOSE-BATCH') + 1],
             'own_refund_rc': conf.as_args()[conf.as_args().index('--Own-settings-REFUND-RC') + 1],
